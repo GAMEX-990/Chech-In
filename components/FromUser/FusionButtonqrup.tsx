@@ -63,15 +63,23 @@ const CreateQRCodeAndUpload: React.FC<CreateQRCodeAndUploadProps> = ({ classId }
     };
 
     return (
-        <div className='-mt-30 -ml-37'>
+        <div className="">
             {/* ปุ่มสร้าง QR Code */}
-            <div className='h-0 w-0 mb-12'>
+            <div className="h-0 md:flex md:flex-col md:-mx-34 md:-mt-60 max-md:mx-5 max-md:flex max-md:flex-row max-md:justify-center max-md:items-center max-md:gap-2 max-md:-mt-70 max-md:mb-26 max-md:h-0">
                 <button
-                    className="border border-purple-600 text-purple-600 px-4 py-1 w-27 rounded-full hover:bg-purple-100 ml-1"
+                   className="w-20 h-auto border-purple-600 text-purple-600 py-1 rounded-2xl hover:bg-purple-100 md:mb-2 border md:ml-2"
                     onClick={handleCreateQR}
                 >
                     Create QR
                 </button>
+
+                   {/* ปุ่มอัปโหลด CSV */}
+                   <button
+                        onClick={() => document.getElementById('csv-upload')?.click()}
+                        className="w-25 h-auto border border-purple-600 text-purple-600 py-1 rounded-2xl hover:bg-purple-100 "
+                    >
+                        Upload CSV
+                    </button>
             </div>
 
             {/* Modal สำหรับแสดง QR Code */}
@@ -106,13 +114,7 @@ const CreateQRCodeAndUpload: React.FC<CreateQRCodeAndUploadProps> = ({ classId }
             {/* ส่วนอัปโหลดไฟล์ CSV */}
             <div>
                 <div className="h-0 w-0">
-                    {/* ปุ่มอัปโหลด CSV */}
-                    <button
-                        onClick={() => document.getElementById('csv-upload')?.click()}
-                        className="border border-purple-600 text-purple-600 px-4 py-1 w-30 rounded-full hover:bg-purple-100"
-                    >
-                        Upload CSV
-                    </button>
+                 
                 </div>
                 {/* input file ที่ซ่อนไว้ */}
                 <input
