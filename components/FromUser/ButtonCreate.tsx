@@ -1,7 +1,8 @@
 "use client";
+import { increment } from 'firebase/firestore';  // เพิ่มบรรทัดนี้ที่ด้านบน
 import { useState, useEffect, useRef, ChangeEvent } from "react";
 import { db } from "@/lib/firebase";
-import { collection, addDoc, Timestamp, updateDoc, arrayUnion, doc } from "firebase/firestore";
+import { collection, addDoc, Timestamp, updateDoc, arrayUnion, doc, getDoc } from "firebase/firestore";
 import Image from "next/image";
 import { useUser } from "@clerk/nextjs";
 import { FaTimes } from "react-icons/fa";
@@ -12,7 +13,6 @@ import { openCamera, scanQRCode, stopCamera } from "@/utils/camera";
 export default function AddClassPopup() {
   // State variables สำหรับจัดการสถานะต่างๆ
   //------------------------------------------------------------------------------------------------
-  const [qrResult, setQrResult] = useState(""); // เพิ่ม state สำหรับเก็บผลการสแกน QR Code
   const canvasRef = useRef<HTMLCanvasElement>(null);
   //------------------------------------------------------------------------------------------------
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -24,16 +24,56 @@ export default function AddClassPopup() {
   const [classId, setClassId] = useState<string | null>(null); // ID ของคลาสที่สร้าง
   const { user, isSignedIn } = useUser(); // ข้อมูลผู้ใช้จาก Clerk
 
+
+
   // เพิ่มฟังก์ชันสำหรับจัดการเมื่อสแกน QR Code สำเร็จ
-  const handleQRDetected = (result: { data: string }) => {
-    setQrResult(result.data);
-    setScanning(false); // ปิดการสแกนเมื่อได้ผลลัพธ์
-    // ทำการจัดการกับข้อมูลที่ได้จาก QR Code ตามต้องการ
-    alert(`สแกน QR Code สำเร็จ: ${result.data}`);
+  const handleQRDetected = async (result: { data: string }) => {
+    try {
+      const url = new URL(result.data);
+      const classId = url.pathname.split('/').pop();
+      
+      if (!classId || !user) {
+        alert('ไม่สามารถเช็คชื่อได้ กรุณาลองใหม่');
+        return;
+      }
+  
+      setLoading(true);
+      
+      const classRef = doc(db, "classes", classId);
+      const classDoc = await getDoc(classRef);
+      
+      if (classDoc.exists()) {
+        const classData = classDoc.data();
+        const checkedInMembers = classData.checkedInMembers || [];
+        
+        // ตรวจสอบว่าเคยเช็คชื่อแล้วหรือไม่
+        if (checkedInMembers.includes(user.id)) {
+          alert('คุณได้เช็คชื่อไปแล้ว!');
+          return;
+        }
+  
+        // อัพเดทเฉพาะเมื่อยังไม่เคยเช็คชื่อ
+        await updateDoc(classRef, {
+          checkedInMembers: arrayUnion(user.id),
+          checkedInCount: checkedInMembers.length + 1, // ใช้จำนวนจริงจาก array
+          lastCheckedIn: Timestamp.now()
+        });
+  
+        alert('เช็คชื่อสำเร็จ!');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      alert('เกิดข้อผิดพลาดในการเช็คชื่อ');
+    } finally {
+      setLoading(false);
+      setScanning(false);
+    }
   };
 
 
   useEffect(() => {
+    let currentStream: MediaStream | null = null;
+
     if (scanning && videoRef.current && canvasRef.current) {
       // เปิดกล้อง
       openCamera(videoRef.current).then((stream) => {
@@ -53,8 +93,9 @@ export default function AddClassPopup() {
           if (scanner) {
             scanner.stop();
           }
-          if (stream) {
-            stopCamera(stream);
+          if (currentStream) {
+            stopCamera(currentStream);
+            currentStream = null;
           }
         };
       }).catch((error) => {
@@ -62,6 +103,12 @@ export default function AddClassPopup() {
         alert("ไม่สามารถเปิดกล้องได้ กรุณาตรวจสอบการอนุญาตการใช้งานกล้อง");
         setScanning(false);
       });
+      return () => {
+        if (currentStream) {
+          stopCamera(currentStream);
+          currentStream = null;
+        }
+      };
     }
   }, [scanning]); // เพิ่ม scanning เป็น dependency
   // ฟังก์ชันสำหรับสร้างคลาสใหม่
@@ -93,6 +140,8 @@ export default function AddClassPopup() {
         created_at: Timestamp.fromDate(new Date()), // วันที่สร้าง
         members: [userId], // สมาชิกในคลาส
         memberCount: 1, // จำนวนสมาชิก
+        checkedInCount: 0,  // เพิ่มฟิลด์นี้
+        checkedInMembers: [], // เพิ่มฟิลด์นี้
         owner_email: userEmail, // อีเมลของเจ้าของคลาส
         last_updated: Timestamp.fromDate(new Date()), // วันที่อัปเดตล่าสุด
       });
@@ -108,43 +157,43 @@ export default function AddClassPopup() {
     }
   };
 
-  // ฟังก์ชันสำหรับอัปโหลดไฟล์ CSV ข้อมูลนักเรียน
-  const handleUploadCSV = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return; // ถ้าไม่มีไฟล์ให้หยุด
+  // // ฟังก์ชันสำหรับอัปโหลดไฟล์ CSV ข้อมูลนักเรียน
+  // const handleUploadCSV = async (event: ChangeEvent<HTMLInputElement>) => {
+  //   const file = event.target.files?.[0];
+  //   if (!file) return; // ถ้าไม่มีไฟล์ให้หยุด
 
-    // ตรวจสอบว่ามี classId หรือไม่
-    if (!classId) {
-      alert("กรุณาสร้างคลาสก่อนอัปโหลดนักเรียน");
-      return;
-    }
+  //   // ตรวจสอบว่ามี classId หรือไม่
+  //   if (!classId) {
+  //     alert("กรุณาสร้างคลาสก่อนอัปโหลดนักเรียน");
+  //     return;
+  //   }
 
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      const text = e.target?.result;
-      if (typeof text !== "string") return;
+  //   const reader = new FileReader();
+  //   reader.onload = async (e) => {
+  //     const text = e.target?.result;
+  //     if (typeof text !== "string") return;
 
-      // แยกข้อมูลแต่ละบรรทัดใน CSV
-      const lines = text.split("\n");
-      for (const line of lines) {
-        const [name, studentId, major] = line.trim().split(",");
+  //     // แยกข้อมูลแต่ละบรรทัดใน CSV
+  //     const lines = text.split("\n");
+  //     for (const line of lines) {
+  //       const [name, studentId, major] = line.trim().split(",");
 
-        // ถ้ามีข้อมูลครบถ้วนให้บันทึกลง Firebase
-        if (name && studentId && major) {
-          await addDoc(collection(db, "students"), {
-            name, // ชื่อนักเรียน
-            studentId, // รหัสนักเรียน
-            major, // สาขาวิชา
-            classId, // ID ของคลาส
-            createdAt: Timestamp.now(), // วันที่สร้าง
-          });
-        }
-      }
-      alert("อัปโหลดข้อมูลนักเรียนสำเร็จ!");
-    };
+  //       // ถ้ามีข้อมูลครบถ้วนให้บันทึกลง Firebase
+  //       if (name && studentId && major) {
+  //         await addDoc(collection(db, "students"), {
+  //           name, // ชื่อนักเรียน
+  //           studentId, // รหัสนักเรียน
+  //           major, // สาขาวิชา
+  //           classId, // ID ของคลาส
+  //           createdAt: Timestamp.now(), // วันที่สร้าง
+  //         });
+  //       }
+  //     }
+  //     alert("อัปโหลดข้อมูลนักเรียนสำเร็จ!");
+  //   };
 
-    reader.readAsText(file); // อ่านไฟล์เป็นข้อความ
-  };
+  //   reader.readAsText(file); // อ่านไฟล์เป็นข้อความ
+  // };
 
   // ฟังก์ชันสำหรับปิด popup สร้างคลาส
   const closePopup = () => {
@@ -267,7 +316,15 @@ export default function AddClassPopup() {
           </div>
           <button
             className="absolute top-2 right-1 text-purple-500 hover:text-purple-700"
-            onClick={() => setScanning(false)}
+            onClick={() => {
+              setScanning(false);
+              // ถ้ามี video stream อยู่ให้หยุดการทำงาน
+              if (videoRef.current?.srcObject) {
+                const stream = videoRef.current.srcObject as MediaStream;
+                stopCamera(stream);
+                videoRef.current.srcObject = null;
+              }
+            }}
           >
             <FaTimes size={40} />
           </button>
